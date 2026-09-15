@@ -195,9 +195,9 @@ with sekme2:
                     df_ozet_tablo = pd.DataFrame(portfoy_ozet)
                     st.dataframe(df_ozet_tablo, use_container_width=True)
 
-                    # --- SİLME İŞLEMİ KONTROL PANELİ ---
+                    # --- SİLME İŞLEMİ KONTROL PANELİ (DÜZELTİLDİ: 'id') ---
                     st.markdown("#### 🗑️ Portföyden Kayıt Sil")
-                    silinecek_id = st.selectbox("Silmek istediğiniz kaydın ID numarasını seçin", options=df_portfoy['ID'].tolist(), key="sil_id_secim")
+                    silinecek_id = st.selectbox("Silmek istediğiniz kaydın ID numarasını seçin", options=df_portfoy['id'].tolist(), key="sil_id_secim")
                     if st.button("Seçili Kaydı Portföyden Sil"):
                         try:
                             del_url = f"{SUPABASE_URL}/rest/v1/portfoy_islemleri?id=eq.{silinecek_id}"
