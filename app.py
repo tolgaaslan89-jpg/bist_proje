@@ -152,9 +152,9 @@ with sekme2:
             
             if response.status_code == 200:
                 veri = response.json()
-                df_portfoy = pd.DataFrame(veri)
+                if veri:
+                    df_portfoy = pd.DataFrame(veri)
 
-                if not df_portfoy.empty:
                     toplam_deger = 0
                     toplam_maliyet = 0
                     portfoy_ozet = []
@@ -164,8 +164,14 @@ with sekme2:
                         adet = row['adet']
                         maliyet = row['maliyet']
                         
-                        df_h = veri_getir(h, "1mo")
-                        guncel_fiyat = float(df_h['Close'].iloc[-1]) if not df_h.empty else maliyet
+                        try:
+                            df_h = veri_getir(h, "1mo")
+                            if not df_h.empty and 'Close' in df_h.columns:
+                                guncel_fiyat = float(df_h['Close'].iloc[-1])
+                            else:
+                                guncel_fiyat = maliyet
+                        except Exception:
+                            guncel_fiyat = maliyet
 
                         toplam_tutar = adet * guncel_fiyat
                         maliyet_tutar = adet * maliyet
@@ -211,9 +217,11 @@ with sekme2:
                 else:
                     st.info("Portföyünüzde henüz kayıtlı hisse bulunmuyor.")
             else:
-                st.info("Portföy tablosu henüz boş veya veriler yükleniyor...")
+                st.error(f"Supabase API Hatası ({response.status_code}): {response.text}")
         except Exception as e:
-            st.info("Portföy verileri yüklenirken beklenmeyen durum oluştu.")
+            st.error(f"Portföy verileri yüklenirken hata oluştu: {e}")
+    else:
+        st.error("SUPABASE_URL veya SUPABASE_KEY tanımlı değil.")
 
 # ================= SEKME 3: HIZLI PİYASA TARAMA =================
 with sekme3:
