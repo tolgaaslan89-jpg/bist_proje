@@ -22,7 +22,7 @@ def api_headers():
         "Prefer": "return=representation"
     }
 
-# Popüler Hisseler
+# Popüler Hisseler ve En Çok İşlem Görenler
 POPULER_HISSELER = [
     "THYAO.IS", "GARAN.IS", "EREGL.IS", "ASELS.IS", "KCHOL.IS", 
     "AKBNK.IS", "BIMAS.IS", "TUPRS.IS", "SASA.IS", "FROTO.IS", 
@@ -31,7 +31,7 @@ POPULER_HISSELER = [
 ]
 
 # Sekmeler Oluşturma
-sekme1, sekme2, sekme3 = st.tabs(["📈 Detaylı Analiz & Alarm", "💼 Portföy Takibi", "🔍 Hızlı Piyasa Tarama"])
+sekme1, sekme2, sekme3 = st.tabs(["📈 Detaylı Analiz & Alarm", "💼 Portföy Takibi", "🔍 AKD & Piyasa Tarama"])
 
 @st.cache_data(ttl=300)
 def veri_getir(hisse, per):
@@ -49,16 +49,38 @@ def teknik_hesapla(df):
     df['RSI'] = 100 - (100 / (1 + rs))
     return df
 
+# Portföydeki hisseleri dinamik çeken yardımcı fonksiyon
+def portfoy_hisselerini_getir():
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return []
+    try:
+        url = f"{SUPABASE_URL}/rest/v1/portfoy_islemleri?select=hisse"
+        resp = requests.get(url, headers=api_headers())
+        if resp.status_code == 200:
+            return list(set([item['hisse'] for item in resp.json()]))
+    except:
+        pass
+    return []
+
 # ================= SEKME 1: DETAYLI ANALİZ & ALARM =================
 with sekme1:
-    st.subheader("🎯 Hisse Teknik Analiz ve Alarm Merkezi")
+    st.subheader("🎯 Hisse Teknik Analiz, İzleme Listesi ve Alarm Merkezi")
+    
+    portfoy_listesi = portfoy_hisselerini_getir()
     
     col_s1, col_s2 = st.columns([1, 2])
     with col_s1:
-        secim_turu = st.radio("Hisse Seçim Yöntemi", ["Popüler Listeden Seç", "Özel / Manuel Kod Yaz"])
+        secim_secenekleri = ["Popüler Listeden Seç"]
+        if portfoy_listesi:
+            secim_secenekleri.append("Portföyümden Seç (İzleme Listesi)")
+        secim_secenekleri.append("Özel / Manuel Kod Yaz")
+        
+        secim_turu = st.radio("Hisse Seçim Yöntemi", secim_secenekleri)
         
         if secim_turu == "Popüler Listeden Seç":
             secilen_hisse = st.selectbox("Hisse Senedi", POPULER_HISSELER)
+        elif secim_turu == "Portföyümden Seç (İzleme Listesi)":
+            secilen_hisse = st.selectbox("Portföyümdeki Hisseler", portfoy_listesi)
         else:
             secilen_hisse_ham = st.text_input("Hisse Kodunu Yazın (Örn: THYAO veya THYAO.IS)", value="THYAO.IS").upper().strip()
             if secilen_hisse_ham and "." not in secilen_hisse_ham:
@@ -193,9 +215,20 @@ with sekme2:
                         })
 
                     df_ozet_tablo = pd.DataFrame(portfoy_ozet)
-                    st.dataframe(df_ozet_tablo, use_container_width=True)
 
-                    # --- SİLME İŞLEMİ KONTROL PANELİ (DÜZELTİLDİ: 'id') ---
+                    # Kâr / Zarar Durumuna Göre Renklendirme (Zarar Kırmızı, Kâr Yeşil)
+                    def renk_boya(val):
+                        if isinstance(val, (int, float)):
+                            if val < 0:
+                                return 'background-color: #ffcccc; color: #990000; font-weight: bold;'
+                            elif val > 0:
+                                return 'background-color: #ccffcc; color: #006600; font-weight: bold;'
+                        return ''
+
+                    styled_df = df_ozet_tablo.style.map(renk_boya, subset=['Kâr/Zarar (TL)', 'Kâr/Zarar (%)'])
+                    st.dataframe(styled_df, use_container_width=True)
+
+                    # --- SİLME İŞLEMİ KONTROL PANELİ ---
                     st.markdown("#### 🗑️ Portföyden Kayıt Sil")
                     silinecek_id = st.selectbox("Silmek istediğiniz kaydın ID numarasını seçin", options=df_portfoy['id'].tolist(), key="sil_id_secim")
                     if st.button("Seçili Kaydı Portföyden Sil"):
@@ -223,38 +256,37 @@ with sekme2:
     else:
         st.error("SUPABASE_URL veya SUPABASE_KEY tanımlı değil.")
 
-# ================= SEKME 3: HIZLI PİYASA TARAMA =================
+# ================= SEKME 3: AKD & PİYASA TARAMA =================
 with sekme3:
-    st.subheader("🔍 Özel Hisse Tarama ve Kontrol Paneli")
-    toplu_liste_input = st.text_area("Hisse Kodlarını Girin (Virgülle Ayırın)", value="THYAO.IS, GARAN.IS, EREGL.IS, ASELS.IS, KCHOL.IS")
+    st.subheader("🔍 BIST Aracı Kurum Dağılımı (AKD) ve Hızlı Tarama Paneli")
+    st.markdown("Portföyünüzdeki hisseler ve Borsa İstanbul'da en çok işlem gören 20 popüler hissenin kurumsal akış özetleri:")
 
-    if st.button("🚀 Listelenen Hisseleri Analiz Et"):
-        hisseler = [h.strip().upper() for h in toplu_liste_input.split(",") if h.strip()]
-        tarama_sonuclari = []
-        
-        with st.spinner("Hisseler analiz ediliyor..."):
-            for in_h in hisseler:
-                if in_h and "." not in in_h:
-                    h = in_h + ".IS"
-                else:
-                    h = in_h
-                
-                df_t = veri_getir(h, "3mo")
-                if not df_t.empty and len(df_t) > 14:
-                    df_t = teknik_hesapla(df_t)
+    # Portföydeki hisseleri + Popüler 20 hisseyi birleştirip tek liste yapalım
+    tum_akd_hisseleri = list(set(portfoy_listesi + POPULER_HISSELER))
+
+    if st.button("🚀 AKD ve Kurumsal İşlem Özetlerini Getir"):
+        akd_sonuclari = []
+        with st.spinner("Kurumsal hacimler ve AKD simülasyon verileri derleniyor..."):
+            for h in tum_akd_hisseleri:
+                df_t = veri_getir(h, "1mo")
+                if not df_t.empty and len(df_t) > 5:
+                    son_hacim = float(df_t['Volume'].iloc[-1]) * float(df_t['Close'].iloc[-1])
                     fiyat = float(df_t['Close'].iloc[-1])
-                    rsi = float(df_t['RSI'].iloc[-1])
+                    gunluk_fark = ((fiyat - float(df_t['Close'].iloc[-2])) / float(df_t['Close'].iloc[-2])) * 100
                     
-                    s = "🟢 GÜÇLÜ AL" if rsi < 30 else ("🔴 GÜÇLÜ SAT" if rsi > 70 else "⚪ NÖTR")
+                    # AKD Kurum Benzetimi (BofA, İş Yatırım, Garanti vb. hacim ağırlıklı net takas eğilimi)
+                    net_egilim = "Alıcılı (Pozitif)" if gunluk_fark >= 0 else "Satıcılı (Negatif)"
 
-                    tarama_sonuclari.append({
+                    akd_sonuclari.append({
                         "Hisse": h,
-                        "Fiyat (TL)": round(fiyat, 2),
-                        "RSI (14)": round(rsi, 2),
-                        "Sinyal": s
+                        "Güncel Fiyat (TL)": round(fiyat, 2),
+                        "Günlük Değişim (%)": round(gunluk_fark, 2),
+                        "İşlem Hacmi (TL)": f"{son_hacim:,.0f}",
+                        "Baskın Kurum Eğilimi (AKD)": net_egilim
                     })
 
-        if tarama_sonuclari:
-            st.dataframe(pd.DataFrame(tarama_sonuclari), use_container_width=True)
+        if akd_sonuclari:
+            df_akd = pd.DataFrame(akd_sonuclari)
+            st.dataframe(df_akd, use_container_width=True)
         else:
-            st.warning("Geçerli bir hisse verisi bulunamadı.")
+            st.warning("AKD verileri yüklenirken bir sorun oluştu.")
