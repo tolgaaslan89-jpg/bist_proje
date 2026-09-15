@@ -21,6 +21,7 @@ def baglanti_kur():
     except Exception as e:
         st.error(f"Veritabanı bağlantı hatası: {e}")
         return None
+
 # Popüler Hisseler
 POPULER_HISSELER = [
     "THYAO.IS", "GARAN.IS", "EREGL.IS", "ASELS.IS", "KCHOL.IS", 
@@ -91,7 +92,11 @@ with sekme1:
         if secim_turu == "Popüler Listeden Seç":
             secilen_hisse = st.selectbox("Hisse Senedi", POPULER_HISSELER)
         else:
-            secilen_hisse = st.text_input("Hisse Kodunu Yazın (Örn: THYAO.IS, FROTO.IS)", value="THYAO.IS").upper().strip()
+            secilen_hisse_ham = st.text_input("Hisse Kodunu Yazın (Örn: THYAO veya THYAO.IS)", value="THYAO.IS").upper().strip()
+            if secilen_hisse_ham and "." not in secilen_hisse_ham:
+                secilen_hisse = secilen_hisse_ham + ".IS"
+            else:
+                secilen_hisse = secilen_hisse_ham
 
         periyot = st.selectbox("Periyot", ["3mo", "6mo", "1y"], index=1)
         hedef_fiyat = st.number_input("Alarm Hedef Fiyatı (TL)", value=0.0)
@@ -134,95 +139,95 @@ with sekme1:
 # ================= SEKME 2: PORTFÖY TAKİBİ =================
 with sekme2:
     st.subheader("💼 Portföy ve Varlık Yönetimi")
+    
+    with st.form("portfoy_form"):
+        col_p1, col_p2, col_p3 = st.columns(3)
+        p_hisse_ham = col_p1.text_input("Hisse Kodunu Yazın (Örn: EREGL veya EREGL.IS)", value="EREGL.IS").upper().strip()
         
-        with st.form("portfoy_form"):
-            col_p1, col_p2, col_p3 = st.columns(3)
-            p_hisse_ham = col_p1.text_input("Hisse Kodunu Yazın (Örn: EREGL veya EREGL.IS)", value="EREGL.IS").upper().strip()
-            
-            if p_hisse_ham and "." not in p_hisse_ham:
-                p_hisse = p_hisse_ham + ".IS"
+        if p_hisse_ham and "." not in p_hisse_ham:
+            p_hisse = p_hisse_ham + ".IS"
+        else:
+            p_hisse = p_hisse_ham
+
+        p_adet = col_p2.number_input("Adet / Lot Miktarı", min_value=1.0, value=100.0)
+        p_maliyet = col_p3.number_input("Alış Maliyeti (TL)", min_value=0.0, value=10.0)
+        
+        kayit_buton = st.form_submit_button("Portföye Ekle / Kaydet")
+        
+        if kayit_buton and p_hisse:
+            conn = baglanti_kur()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        CREATE TABLE IF NOT EXISTS portfoy_islemleri (
+                            id SERIAL PRIMARY KEY,
+                            hisse VARCHAR(20),
+                            adet FLOAT,
+                            maliyet FLOAT
+                        )
+                    """)
+                    cur.execute("INSERT INTO portfoy_islemleri (hisse, adet, maliyet) VALUES (%s, %s, %s)", (p_hisse, p_adet, p_maliyet))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    st.success(f"✅ {p_hisse} portföye başarıyla eklendi!")
+                except Exception as ex:
+                    st.error(f"❌ Veritabanına kayıt yazılırken hata oluştu: {ex}")
             else:
-                p_hisse = p_hisse_ham
+                st.error("❌ Veritabanı bağlantısı kurulamadığı için kayıt yapılamadı.")
 
-            p_adet = col_p2.number_input("Adet / Lot Miktarı", min_value=1.0, value=100.0)
-            p_maliyet = col_p3.number_input("Alış Maliyeti (TL)", min_value=0.0, value=10.0)
-            
-            kayit_buton = st.form_submit_button("Portföye Ekle / Kaydet")
-            
-            if kayit_buton and p_hisse:
-                conn = baglanti_kur()
-                if conn:
-                    try:
-                        cur = conn.cursor()
-                        cur.execute("""
-                            CREATE TABLE IF NOT EXISTS portfoy_islemleri (
-                                id SERIAL PRIMARY KEY,
-                                hisse VARCHAR(20),
-                                adet FLOAT,
-                                maliyet FLOAT
-                            )
-                        """)
-                        cur.execute("INSERT INTO portfoy_islemleri (hisse, adet, maliyet) VALUES (%s, %s, %s)", (p_hisse, p_adet, p_maliyet))
-                        conn.commit()
-                        cur.close()
-                        conn.close()
-                        st.success(f"✅ {p_hisse} portföye başarıyla eklendi!")
-                    except Exception as ex:
-                        st.error(f"❌ Veritabanına kayıt yazılırken hata oluştu: {ex}")
-                else:
-                    st.error("❌ Veritabanı bağlantısı kurulamadığı için kayıt yapılamadı.")
+    st.markdown("---")
+    st.markdown("### 📊 Mevcut Portföy Durumunuz")
+    conn = baglanti_kur()
+    if conn:
+        try:
+            df_portfoy = pd.read_sql("SELECT id, hisse, adet, maliyet FROM portfoy_islemleri", conn)
+            conn.close()
 
-        st.markdown("---")
-        st.markdown("### 📊 Mevcut Portföy Durumunuz")
-        conn = baglanti_kur()
-        if conn:
-            try:
-                df_portfoy = pd.read_sql("SELECT id, hisse, adet, maliyet FROM portfoy_islemleri", conn)
-                conn.close()
+            if not df_portfoy.empty:
+                toplam_deger = 0
+                toplam_maliyet = 0
+                portfoy_ozet = []
 
-                if not df_portfoy.empty:
-                    toplam_deger = 0
-                    toplam_maliyet = 0
-                    portfoy_ozet = []
+                for index, row in df_portfoy.iterrows():
+                    h = row['hisse']
+                    adet = row['adet']
+                    maliyet = row['maliyet']
+                    
+                    df_h = veri_getir(h, "1mo")
+                    guncel_fiyat = float(df_h['Close'].iloc[-1]) if not df_h.empty else maliyet
 
-                    for index, row in df_portfoy.iterrows():
-                        h = row['hisse']
-                        adet = row['adet']
-                        maliyet = row['maliyet']
-                        
-                        df_h = veri_getir(h, "1mo")
-                        guncel_fiyat = float(df_h['Close'].iloc[-1]) if not df_h.empty else maliyet
+                    toplam_tutar = adet * guncel_fiyat
+                    maliyet_tutar = adet * maliyet
+                    kar_zarar = toplam_tutar - maliyet_tutar
+                    kar_zarar_yuzde = ((guncel_fiyat - maliyet) / maliyet) * 100 if maliyet > 0 else 0
 
-                        toplam_tutar = adet * guncel_fiyat
-                        maliyet_tutar = adet * maliyet
-                        kar_zarar = toplam_tutar - maliyet_tutar
-                        kar_zarar_yuzde = ((guncel_fiyat - maliyet) / maliyet) * 100 if maliyet > 0 else 0
+                    toplam_deger += toplam_tutar
+                    toplam_maliyet += maliyet_tutar
 
-                        toplam_deger += toplam_tutar
-                        toplam_maliyet += maliyet_tutar
+                    portfoy_ozet.append({
+                        "ID": row['id'],
+                        "Hisse": h,
+                        "Adet": adet,
+                        "Maliyet (TL)": maliyet,
+                        "Güncel Fiyat (TL)": round(guncel_fiyat, 2),
+                        "Toplam Değer (TL)": round(toplam_tutar, 2),
+                        "Kâr/Zarar (TL)": round(kar_zarar, 2),
+                        "Kâr/Zarar (%)": round(kar_zarar_yuzde, 2)
+                    })
 
-                        portfoy_ozet.append({
-                            "ID": row['id'],
-                            "Hisse": h,
-                            "Adet": adet,
-                            "Maliyet (TL)": maliyet,
-                            "Güncel Fiyat (TL)": round(guncel_fiyat, 2),
-                            "Toplam Değer (TL)": round(toplam_tutar, 2),
-                            "Kâr/Zarar (TL)": round(kar_zarar, 2),
-                            "Kâr/Zarar (%)": round(kar_zarar_yuzde, 2)
-                        })
+                df_ozet_tablo = pd.DataFrame(portfoy_ozet)
+                st.dataframe(df_ozet_tablo, use_container_width=True)
 
-                    df_ozet_tablo = pd.DataFrame(portfoy_ozet)
-                    st.dataframe(df_ozet_tablo, use_container_width=True)
-
-                    genel_kar = toplam_deger - toplam_maliyet
-                    col_d1, col_d2 = st.columns(2)
-                    col_d1.metric("Toplam Portföy Değeri", f"{toplam_deger:,.2f} TL")
-                    col_d2.metric("Toplam Kâr / Zarar", f"{genel_kar:,.2f} TL", delta_color="normal" if genel_kar >=0 else "inverse")
-                else:
-                    st.info("Portföyünüzde henüz kayıtlı hisse bulunmuyor.")
-            except Exception as e:
-                st.info("Portföy verileri yükleniyor...")
+                genel_kar = toplam_deger - toplam_maliyet
+                col_d1, col_d2 = st.columns(2)
+                col_d1.metric("Toplam Portföy Değeri", f"{toplam_deger:,.2f} TL")
+                col_d2.metric("Toplam Kâr / Zarar", f"{genel_kar:,.2f} TL", delta_color="normal" if genel_kar >=0 else "inverse")
+            else:
+                st.info("Portföyünüzde henüz kayıtlı hisse bulunmuyor.")
+        except Exception as e:
+            st.info("Portföy verileri yükleniyor...")
 
 # ================= SEKME 3: HIZLI PİYASA TARAMA =================
 with sekme3:
@@ -234,7 +239,12 @@ with sekme3:
         tarama_sonuclari = []
         
         with st.spinner("Hisseler analiz ediliyor..."):
-            for h in hisseler:
+            for in_h in hisseler:
+                if in_h and "." not in in_h:
+                    h = in_h + ".IS"
+                else:
+                    h = in_h
+                
                 df_t = veri_getir(h, "3mo")
                 if not df_t.empty and len(df_t) > 14:
                     df_t = teknik_hesapla(df_t)
