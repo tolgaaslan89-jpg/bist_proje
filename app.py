@@ -1,26 +1,26 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import psycopg2
+import requests
 from datetime import datetime
 
 # Sayfa Ayarları
 st.set_page_config(page_title="BIST Sınırsız Yatırım Terminali", page_icon="📈", layout="wide")
 
 st.title("🚀 BIST Sınırsız Karar Destek ve Portföy Terminali")
-st.markdown("Canlı veri akışı, portföy yönetimi, akıllı alarmlar ve bulut veritabanı entegrasyonu.")
+st.markdown("Canlı veri akışı, portföy yönetimi, akıllı alarmlar ve bulut entegrasyonu.")
 
-# Veritabanı Bağlantı Fonksiyonu (Supabase Bulut Uyumlu)
-def baglanti_kur():
-    try:
-        db_url = st.secrets.get("DATABASE_URL")
-        if not db_url:
-            st.error("⚠️ Streamlit Cloud Secrets içinde 'DATABASE_URL' bulunamadı!")
-            return None
-        return psycopg2.connect(db_url)
-    except Exception as e:
-        st.error(f"Veritabanı bağlantı hatası: {e}")
-        return None
+# Supabase REST API Bilgileri (HTTPS Üzerinden Çalışır - DNS Hatası Asla Vermez)
+SUPABASE_URL = st.secrets.get("SUPABASE_URL")
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
+
+def api_headers():
+    return {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
 
 # Popüler Hisseler
 POPULER_HISSELER = [
@@ -29,38 +29,6 @@ POPULER_HISSELER = [
     "PGSUS.IS", "MGROS.IS", "KRDMD.IS", "SAHOL.IS", "SISE.IS",
     "ISCTR.IS", "YKBNK.IS", "PETKM.IS", "TOASO.IS", "TAVHL.IS"
 ]
-
-# Veritabanı Tablolarını Oluşturma
-def veritabani_tablolari_kur():
-    conn = baglanti_kur()
-    if conn:
-        try:
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS analiz_gecmisi (
-                    id SERIAL PRIMARY KEY,
-                    hisse VARCHAR(20),
-                    tarih TIMESTAMP,
-                    fiyat FLOAT,
-                    rsi FLOAT,
-                    sinyal VARCHAR(50)
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS portfoy_islemleri (
-                    id SERIAL PRIMARY KEY,
-                    hisse VARCHAR(20),
-                    adet FLOAT,
-                    maliyet FLOAT
-                )
-            """)
-            conn.commit()
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            print("Tablo kurulum hatası:", e)
-
-veritabani_tablolari_kur()
 
 # Sekmeler Oluşturma
 sekme1, sekme2, sekme3 = st.tabs(["📈 Detaylı Analiz & Alarm", "💼 Portföy Takibi", "🔍 Hızlı Piyasa Tarama"])
@@ -155,79 +123,82 @@ with sekme2:
         kayit_buton = st.form_submit_button("Portföye Ekle / Kaydet")
         
         if kayit_buton and p_hisse:
-            conn = baglanti_kur()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("""
-                        CREATE TABLE IF NOT EXISTS portfoy_islemleri (
-                            id SERIAL PRIMARY KEY,
-                            hisse VARCHAR(20),
-                            adet FLOAT,
-                            maliyet FLOAT
-                        )
-                    """)
-                    cur.execute("INSERT INTO portfoy_islemleri (hisse, adet, maliyet) VALUES (%s, %s, %s)", (p_hisse, p_adet, p_maliyet))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    st.success(f"✅ {p_hisse} portföye başarıyla eklendi!")
-                except Exception as ex:
-                    st.error(f"❌ Veritabanına kayıt yazılırken hata oluştu: {ex}")
+            if not SUPABASE_URL or not SUPABASE_KEY:
+                st.error("❌ SUPABASE_URL veya SUPABASE_KEY Streamlit Secrets içinde tanımlı değil!")
             else:
-                st.error("❌ Veritabanı bağlantısı kurulamadığı için kayıt yapılamadı.")
+                try:
+                    url = f"{SUPABASE_URL}/rest/v1/portfoy_islemleri"
+                    payload = {
+                        "hisse": p_hisse,
+                        "adet": p_adet,
+                        "maliyet": p_maliyet
+                    }
+                    response = requests.post(url, headers=api_headers(), json=payload)
+                    if response.status_code in [200, 201]:
+                        st.success(f"✅ {p_hisse} portföye başarıyla eklendi!")
+                        st.rerun()
+                    else:
+                        st.error(f"❌ Kayıt eklenemedi: {response.text}")
+                except Exception as ex:
+                    st.error(f"❌ Bağlantı hatası: {ex}")
 
     st.markdown("---")
     st.markdown("### 📊 Mevcut Portföy Durumunuz")
-    conn = baglanti_kur()
-    if conn:
+    
+    if SUPABASE_URL and SUPABASE_KEY:
         try:
-            df_portfoy = pd.read_sql("SELECT id, hisse, adet, maliyet FROM portfoy_islemleri", conn)
-            conn.close()
+            url = f"{SUPABASE_URL}/rest/v1/portfoy_islemleri?select=id,hisse,adet,maliyet"
+            response = requests.get(url, headers=api_headers())
+            
+            if response.status_code == 200:
+                veri = response.json()
+                df_portfoy = pd.DataFrame(veri)
 
-            if not df_portfoy.empty:
-                toplam_deger = 0
-                toplam_maliyet = 0
-                portfoy_ozet = []
+                if not df_portfoy.empty:
+                    toplam_deger = 0
+                    toplam_maliyet = 0
+                    portfoy_ozet = []
 
-                for index, row in df_portfoy.iterrows():
-                    h = row['hisse']
-                    adet = row['adet']
-                    maliyet = row['maliyet']
-                    
-                    df_h = veri_getir(h, "1mo")
-                    guncel_fiyat = float(df_h['Close'].iloc[-1]) if not df_h.empty else maliyet
+                    for index, row in df_portfoy.iterrows():
+                        h = row['hisse']
+                        adet = row['adet']
+                        maliyet = row['maliyet']
+                        
+                        df_h = veri_getir(h, "1mo")
+                        guncel_fiyat = float(df_h['Close'].iloc[-1]) if not df_h.empty else maliyet
 
-                    toplam_tutar = adet * guncel_fiyat
-                    maliyet_tutar = adet * maliyet
-                    kar_zarar = toplam_tutar - maliyet_tutar
-                    kar_zarar_yuzde = ((guncel_fiyat - maliyet) / maliyet) * 100 if maliyet > 0 else 0
+                        toplam_tutar = adet * guncel_fiyat
+                        maliyet_tutar = adet * maliyet
+                        kar_zarar = toplam_tutar - maliyet_tutar
+                        kar_zarar_yuzde = ((guncel_fiyat - maliyet) / maliyet) * 100 if maliyet > 0 else 0
 
-                    toplam_deger += toplam_tutar
-                    toplam_maliyet += maliyet_tutar
+                        toplam_deger += toplam_tutar
+                        toplam_maliyet += maliyet_tutar
 
-                    portfoy_ozet.append({
-                        "ID": row['id'],
-                        "Hisse": h,
-                        "Adet": adet,
-                        "Maliyet (TL)": maliyet,
-                        "Güncel Fiyat (TL)": round(guncel_fiyat, 2),
-                        "Toplam Değer (TL)": round(toplam_tutar, 2),
-                        "Kâr/Zarar (TL)": round(kar_zarar, 2),
-                        "Kâr/Zarar (%)": round(kar_zarar_yuzde, 2)
-                    })
+                        portfoy_ozet.append({
+                            "ID": row['id'],
+                            "Hisse": h,
+                            "Adet": adet,
+                            "Maliyet (TL)": maliyet,
+                            "Güncel Fiyat (TL)": round(guncel_fiyat, 2),
+                            "Toplam Değer (TL)": round(toplam_tutar, 2),
+                            "Kâr/Zarar (TL)": round(kar_zarar, 2),
+                            "Kâr/Zarar (%)": round(kar_zarar_yuzde, 2)
+                        })
 
-                df_ozet_tablo = pd.DataFrame(portfoy_ozet)
-                st.dataframe(df_ozet_tablo, use_container_width=True)
+                    df_ozet_tablo = pd.DataFrame(portfoy_ozet)
+                    st.dataframe(df_ozet_tablo, use_container_width=True)
 
-                genel_kar = toplam_deger - toplam_maliyet
-                col_d1, col_d2 = st.columns(2)
-                col_d1.metric("Toplam Portföy Değeri", f"{toplam_deger:,.2f} TL")
-                col_d2.metric("Toplam Kâr / Zarar", f"{genel_kar:,.2f} TL", delta_color="normal" if genel_kar >=0 else "inverse")
+                    genel_kar = toplam_deger - toplam_maliyet
+                    col_d1, col_d2 = st.columns(2)
+                    col_d1.metric("Toplam Portföy Değeri", f"{toplam_deger:,.2f} TL")
+                    col_d2.metric("Toplam Kâr / Zarar", f"{genel_kar:,.2f} TL", delta_color="normal" if genel_kar >=0 else "inverse")
+                else:
+                    st.info("Portföyünüzde henüz kayıtlı hisse bulunmuyor.")
             else:
-                st.info("Portföyünüzde henüz kayıtlı hisse bulunmuyor.")
+                st.info("Portföy tablosu henüz boş veya veriler yükleniyor...")
         except Exception as e:
-            st.info("Portföy verileri yükleniyor...")
+            st.info("Portföy verileri yüklenirken beklenmeyen durum oluştu.")
 
 # ================= SEKME 3: HIZLI PİYASA TARAMA =================
 with sekme3:
