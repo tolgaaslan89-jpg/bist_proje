@@ -10,7 +10,7 @@ st.set_page_config(page_title="BIST Sınırsız Yatırım Terminali", page_icon=
 st.title("🚀 BIST Sınırsız Karar Destek ve Portföy Terminali")
 st.markdown("Canlı veri akışı, portföy yönetimi, akıllı alarmlar ve bulut entegrasyonu.")
 
-# Supabase REST API Bilgileri (HTTPS Üzerinden Çalışır - DNS Hatası Asla Vermez)
+# Supabase REST API Bilgileri (HTTPS Üzerinden Çalışır)
 SUPABASE_URL = st.secrets.get("SUPABASE_URL")
 SUPABASE_KEY = st.secrets.get("SUPABASE_KEY")
 
@@ -188,6 +188,21 @@ with sekme2:
 
                     df_ozet_tablo = pd.DataFrame(portfoy_ozet)
                     st.dataframe(df_ozet_tablo, use_container_width=True)
+
+                    # --- SİLME İŞLEMİ KONTROL PANELİ ---
+                    st.markdown("#### 🗑️ Portföyden Kayıt Sil")
+                    silinecek_id = st.selectbox("Silmek istediğiniz kaydın ID numarasını seçin", options=df_portfoy['ID'].tolist(), key="sil_id_secim")
+                    if st.button("Seçili Kaydı Portföyden Sil"):
+                        try:
+                            del_url = f"{SUPABASE_URL}/rest/v1/portfoy_islemleri?id=eq.{silinecek_id}"
+                            del_resp = requests.delete(del_url, headers=api_headers())
+                            if del_resp.status_code in [200, 204]:
+                                st.success(f"✅ ID {silinecek_id} numaralı kayıt başarıyla silindi!")
+                                st.rerun()
+                            else:
+                                st.error(f"❌ Silme başarısız: {del_resp.text}")
+                        except Exception as del_ex:
+                            st.error(f"❌ Silme işleminde hata: {del_ex}")
 
                     genel_kar = toplam_deger - toplam_maliyet
                     col_d1, col_d2 = st.columns(2)
