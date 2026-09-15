@@ -13,13 +13,14 @@ st.markdown("Canlı veri akışı, portföy yönetimi, akıllı alarmlar ve bulu
 # Veritabanı Bağlantı Fonksiyonu (Supabase Bulut Uyumlu)
 def baglanti_kur():
     try:
-        # Önce Streamlit Cloud secrets kontrol edilir, yoksa lokal/test URI kullanılır
-        db_url = st.secrets.get("DATABASE_URL", "BURAYA_SUPABASE_URI_ADRESINI_YAZ")
+        db_url = st.secrets.get("DATABASE_URL")
+        if not db_url:
+            st.error("⚠️ Streamlit Cloud Secrets içinde 'DATABASE_URL' bulunamadı!")
+            return None
         return psycopg2.connect(db_url)
     except Exception as e:
-        print("Veritabanı bağlantı hatası:", e)
+        st.error(f"Veritabanı bağlantı hatası: {e}")
         return None
-
 # Popüler Hisseler
 POPULER_HISSELER = [
     "THYAO.IS", "GARAN.IS", "EREGL.IS", "ASELS.IS", "KCHOL.IS", 
@@ -134,26 +135,43 @@ with sekme1:
 with sekme2:
     st.subheader("💼 Portföy ve Varlık Yönetimi")
     
-    with st.form("portfoy_form"):
-        col_p1, col_p2, col_p3 = st.columns(3)
-        p_hisse = col_p1.text_input("Hisse Kodunu Yazın (Örn: EREGL.IS)", value="EREGL.IS").upper().strip()
-        p_adet = col_p2.number_input("Adet / Lot Miktarı", min_value=1.0, value=100.0)
-        p_maliyet = col_p3.number_input("Alış Maliyeti (TL)", min_value=0.0, value=10.0)
-        
-        kayit_buton = st.form_submit_button("Portföye Ekle / Kaydet")
-        
-        if kayit_buton and p_hisse:
-            conn = baglanti_kur()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("INSERT INTO portfoy_islemleri (hisse, adet, maliyet) VALUES (%s, %s, %s)", (p_hisse, p_adet, p_maliyet))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    st.success(f"{p_hisse} portföye başarıyla eklendi!")
-                except Exception as ex:
-                    st.error(f"Kayıt hatası: {ex}")
+   with st.form("portfoy_form"):
+            col_p1, col_p2, col_p3 = st.columns(3)
+            p_hisse_ham = col_p1.text_input("Hisse Kodunu Yazın (Örn: EREGL veya EREGL.IS)", value="EREGL.IS").upper().strip()
+            
+            if p_hisse_ham and "." not in p_hisse_ham:
+                p_hisse = p_hisse_ham + ".IS"
+            else:
+                p_hisse = p_hisse_ham
+
+            p_adet = col_p2.number_input("Adet / Lot Miktarı", min_value=1.0, value=100.0)
+            p_maliyet = col_p3.number_input("Alış Maliyeti (TL)", min_value=0.0, value=10.0)
+            
+            kayit_buton = st.form_submit_button("Portföye Ekle / Kaydet")
+            
+            if kayit_buton and p_hisse:
+                conn = baglanti_kur()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        # Önce tablonun garanti olması için tablo oluşturma komutu
+                        cur.execute("""
+                            CREATE TABLE IF NOT EXISTS portfoy_islemleri (
+                                id SERIAL PRIMARY KEY,
+                                hisse VARCHAR(20),
+                                adet FLOAT,
+                                maliyet FLOAT
+                            )
+                        """)
+                        cur.execute("INSERT INTO portfoy_islemleri (hisse, adet, maliyet) VALUES (%s, %s, %s)", (p_hisse, p_adet, p_maliyet))
+                        conn.commit()
+                        cur.close()
+                        conn.close()
+                        st.success(f"✅ {p_hisse} portföye başarıyla eklendi!")
+                    except Exception as ex:
+                        st.error(f"❌ Veritabanına kayıt yazılırken hata oluştu: {ex}")
+                else:
+                    st.error("❌ Veritabanı bağlantısı kurulamadığı için kayıt yapılamadı.")
 
     st.markdown("---")
     st.markdown("### 📊 Mevcut Portföy Durumunuz")
